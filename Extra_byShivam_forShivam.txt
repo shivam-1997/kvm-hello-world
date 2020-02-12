@@ -1,0 +1,144 @@
+we are running the executable in long(64-bit compatible) mode.
+
+In the x86-64 computer architecture, long mode is the mode where a 64-bit operating system can access 64-bit instructions and registers. 64-bit programs are run in a sub-mode called 64-bit mode, while 32-bit programs and 16-bit protected mode programs are executed in a sub-mode called compatibility mode. Real mode or virtual 8086 mode programs cannot be natively run in long mode.
+While register sizes have increased to 64 bits from the previous x86 architecture, memory addressing has not yet been increased to the full 64 bits. For the time being, it is impractical to equip computers with sufficient memory to require a full 64 bits.
+
+
+Microprocessor modes for the x86 architecture
+Real mode (Intel 8086)
+8080 emulation mode (NEC V20/V30 only)
+Protected mode (Intel 80286)
+Unreal mode (Intel 80286)
+Virtual 8086 mode (Intel 80386)
+System Management Mode (Intel 386SL)
+Long mode (AMD Opteron)
+x86 virtualization (Intel Pentium 4, models 6x2)
+
+
+Q1: What is the size of the guest memory (that the guest perceives as its physical memory) that is setup in the function vm_init? 
+    How and where in the hyprevisor code is this guest memory allocated from the host OS? 
+    x   At what virtual address is this memory mapped into the virtual address space of this simple hypervisor?
+
+Q2: Besides the guest memory, every VCPU also allocates a small portion of VCPU runtime memory from the host OS in the function , to store the information it has to exchange with KVM. 
+    In which lines of the program is this memory allocated, what is its size, and 
+    x   where is it located in the virutal address space of the hypervisor?
+
+
+Q3: The guest memory area is formatted to contain 
+        the guest code (which is made available as an extern char array in the executable), 
+        the guest page table, 
+        and a kernel stack. 
+    Can you identify where in the code each of these is setup? 
+    What range of addresses do each of these occupy, in 
+        the guest physical address space, 
+        and the host virtual address space?
+
+Q4: Understand the structure of the quest page table, and how the guest virtual address space is mapped to its physical address space using its page table. How many levels does the guest page table have in long mode? How many pages does it occupy? What are the (guest) virutal-to-physical mappings setup in the guest page table? What parts of the guest virtual address space is mapped by this page table?
+
+Q5: At what (guest virtual) address does the guest start execution when it runs? Where is this address configured?
+
+After configuring the guest memory and registers, the hypervisor proceeds to run the guest in the function run_vm.
+
+Q6: At which line in the hypervisor program does the control switch from running the hypervisor to running the guest? At which line does the control switch back to the hypervisor from the guest?
+
+
+mmap system call
+
+#include <sys/mman.h> 
+// The mmap() function asks to 
+// map length bytes 
+// starting at offset offset from the file (or other object) 
+// specified by the file descriptor fd into memory, preferably at address start. 
+// This latter address is a hint only, and is usually specified as 0. 
+// The actual place where the object is mapped is returned by mmap().
+void *mmap(
+            void *start, 
+            size_t length, // in Bytes
+            int prot, 
+            int flags, 
+            int fd, 
+            off_t offset   
+        ); 
+
+// The prot argument describes the desired memory protection 
+// (and must not conflict with the open mode of the file). 
+// It is either PROT_NONE or 
+// is the bitwise OR of one or more of the other PROT_* flags.
+
+// PROT_EXEC    pgs may be executed
+// PROT_READ    .......... read
+// PROT_WRITE   .......... written
+// PROT_NONE    ....... not be accessed
+
+
+
+
+
+int munmap(void *start, size_t length); 
+
+// On success, mmap() returns a pointer to the mapped area. 
+// On error, the value MAP_FAILED (that is, (void *) -1) is returned, 
+// and errno is set appropriately. 
+// On success, munmap() returns 0, on failure -1, and errno is set (probably to EINVAL).
+
+madvise system call
+
+int madvise(void *addr, size_t length, int advice);
+// The madvise() system call is used to give advice or directions to the
+// kernel about the address range beginning at address addr and with
+// size length bytes
+
+MADV_MERGEABLE
+    Enable Kernel Samepage Merging (KSM) for the pages in the
+    range specified by addr and length.  The kernel regularly
+    scans those areas of user memory that have been marked as
+    mergeable, looking for pages with identical content.  These
+    are replaced by a single write-protected page (which is
+    automatically copied if a process later wants to update the
+    content of the page).  KSM merges only private anonymous pages
+    (see mmap(2)).
+
+    The KSM feature is intended for applications that generate
+    many instances of the same data (e.g., virtualization systems
+    such as KVM).  It can consume a lot of processing power; use
+    with care.  See the Linux kernel source file
+    Documentation/admin-guide/mm/ksm.rst for more details.
+
+    The MADV_MERGEABLE and MADV_UNMERGEABLE operations are
+    available only if the kernel was configured with CONFIG_KSM.
+
+
+outb CPU instruction to write a byte of data to a certain I/O port number. 
+This instruction causes the guest to exit to our hypervisor program 
+(since guests cannot perform privileged operations such as accessing I/O ports), 
+and the hypervisor then prints out the character on behalf of the guest.
+
+
+Reading the port number in hypervisor asked by guest:
+    case KVM_EXIT_IO:
+			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
+			    && vcpu->kvm_run->io.port == 0xE9)
+
+data can be read by hypervisor using :
+    char *p = (char *)vcpu->kvm_run;
+    p + vcpu->kvm_run->io.data_offset
+
+vcpu is the memory_bufffer used to communicate the value written by the guest to the hypervisor
+
+One exit for each character to be printed
+
+/*
+    This is the syntax for using the asm() keyword in your C/C++ code:
+
+    asm ( assembler template
+        : output operands                   (optional)
+        : input operands                    (optional)
+        : clobbered registers list          (optional)
+        );
+*/
+
+__asm__("cli": : :"memory"); 
+// Will cause the statement not to be moved, but it may be optimized away.
+__asm__ __volatile__("cli": : :"memory"); 
+// Will cause the statement not to be moved nor optimized away
+
