@@ -166,6 +166,7 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	printf("The memory allocated for vCPU is %d Bytes\n.", vcpu_mmap_size);
 	printf("The vCPU memory is starting at %p.\n", vcpu->kvm_run);
 }
+
 #define MAX_OPEN_FILES 150	// by shivam, tells the max size of file descriptor table
 uint32_t findEmptyIndex(FILE *fileDescArray[]){
 	for(int i=0; i<MAX_OPEN_FILES; i++){
@@ -182,13 +183,14 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 	uint32_t numExits=0;
 	char filePath[100];
 	char mode[3];
-				
-	
+	uint32_t fileDesc_index;
+	FILE *filePointer;
 	FILE *fileDescArray[MAX_OPEN_FILES];
-	// memset(fileDescArray, -1, sizeof(fileDescArray));
 	for(int i=0; i<MAX_OPEN_FILES; i++){
 		fileDescArray[i] = NULL;
 	}
+	uint32_t size;
+
 	for (;;) {
 		// start running the guest
 		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
@@ -196,6 +198,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 			exit(1);
 		}
 		numExits++;
+		printf("EXIT->");
 		// in next line the control switches back to hypervisor from guest
 		switch (vcpu->kvm_run->exit_reason) {
 		case KVM_EXIT_HLT:
@@ -271,33 +274,18 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 	
 					strcpy(filePath, fdt->filePath);
 					strcpy(mode, fdt->mode);
-					// fprintf(stdout, "filePath = %s\n", fdt->filePath);
-					// fprintf(stdout, "mode = %s\n", fdt->mode);					
-					// printf("read structure\n");
-					// fflush(stdout);
 					
 					continue;
 				}
 				// opens fle 
 				if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN) {
 
-					// fprintf(stdout, "filePath = %s\n", filePath);
-					// fprintf(stdout, "mode = %s\n", mode);					
-					// fflush(stdout);
-		
 					FILE *filePointer = fopen(filePath, mode);
-
-					fprintf(filePointer, "%s\n", "hello");
-					fflush(filePointer);
-					printf("size of FILE pointer = %d\n", sizeof(filePointer) );
-					printf("allocate fd in host= %lu\n", filePointer);
-					printf("allocate fd in host= %lu\n", (uint32_t)filePointer);
 					uint32_t emptyIndex = findEmptyIndex(fileDescArray);
 					fileDescArray[emptyIndex] = filePointer;
+					
 					uint8_t *p = (uint8_t *)vcpu->kvm_run;
-					
-					// memcpy(p + vcpu->kvm_run->io.data_offset, filePointer, sizeof(*filePointer));
-					
+					// memcpy(p + vcpu->kvm_run->io.data_offset, fp, 4);
 					memcpy(p + vcpu->kvm_run->io.data_offset, &emptyIndex, sizeof(emptyIndex));
 					
 					continue;
@@ -308,7 +296,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 			if(vcpu->kvm_run->io.port == 0xF1 && vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT){
 				
 				typedef struct data{
-					FILE *filePointer;
+					uint32_t filePointer;
 					char str[100];
 				}wData;
 				
@@ -317,39 +305,83 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 				wData *wdt = vm->mem + *data_guest_virt  ;
 				
 				// fprintf(stdout, "filePath = %s\n", fdt->filePath);
-				fprintf(stdout, "file pointer received in host = %lu \n", wdt->filePointer);
-				fprintf(stdout, "string to be written = %s\n", wdt->str);
-				fflush(stdout);
+				uint32_t fileDesc_index = wdt->filePointer;
+				// fprintf(stdout, "file pointer received in host = %lu \n", filePointer);
+				// fprintf(stdout, "string to be written = %s\n", wdt->str);
+				// fflush(stdout);
+				
+				// fprintf(filePointer, "%s", wdt->str);
+				// fflush(filePointer);
 					
-				fprintf(fileDescArray[(int)(wdt->filePointer)], "%s", wdt->str);
-				fflush(fileDescArray[ (int)(wdt->filePointer)]);
+				if(fprintf(fileDescArray[(int)(fileDesc_index)], "%s", wdt->str)>0){
+					printf("Successfully written to the file\n");
+				}
+				fflush(fileDescArray[ (int)(fileDesc_index)]);
+				
 				continue;
 			}
 			//reads a file
-			if(vcpu->kvm_run->io.port == 0xF2 && vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN){
+			if(vcpu->kvm_run->io.port == 0xF2 ){
+				printf("**********reading from a file\n");
+				fflush(stdout);
+				
 				typedef struct data{
-					uint32_t *filePointer;
+					uint32_t filePointer;
 					// char str[100];
 					int size;
 				}rData;
-				// printf("writing to file\n");
-				uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
-				uint32_t  *data_guest_virt = (uint32_t *)(vcpu_kvm + vcpu->kvm_run->io.data_offset);
-				rData *rdt = vm->mem + *data_guest_virt  ;
+				
+				if( vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT){
 
-				// fprintf(stdout, "filePath = %s\n", fdt->filePath);
-				// fprintf(stdout, "mode = %s\n", fdt->mode);					
-				// printf("read structure\n");
-				// fflush(stdout);
-				continue;
+					printf("copying file descriptor\n");
+					fflush(stdout);
+				
+					uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
+					uint32_t  *data_guest_virt = (uint32_t *)(vcpu_kvm + vcpu->kvm_run->io.data_offset);
+					rData *rdt = vm->mem + *data_guest_virt  ;
+					
+					uint32_t fileDesc_index = rdt->filePointer;
+					
+					filePointer = fileDescArray[fileDesc_index];
+					size = rdt -> size;
+					printf("fd in host = %lu\n", fileDesc_index);
+					fflush(stdout);
+					
+					continue;
+				}
+				if( vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN){
+					printf("reading to buffer \n");
+					fflush(stdout);
+				
+					char *buffer =  (char*)malloc(size);
+					
+					// size_t fread ( void * ptr, size_t size, size_t count, FILE * stream );
+					fread(buffer, sizeof(char), size, filePointer);
+					printf("content in file: %s\n", buffer);
+					fflush(stdout);
+					uint8_t *p = (uint8_t *)vcpu->kvm_run;
+					memcpy(p + vcpu->kvm_run->io.data_offset, &buffer, sizeof(buffer));
+					continue;
+				}
 				
 			}
 			//closes a file
-			if(vcpu->kvm_run->io.port == 0xF3){
-				uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
-				uint32_t  *data_guest_virt = (uint32_t *)(vcpu_kvm + vcpu->kvm_run->io.data_offset);
-				FILE *filePointer = vm->mem + *data_guest_virt;
-				fclose(filePointer);
+			if(vcpu->kvm_run->io.port == 0xF3 &&
+				vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT){
+				
+				const char *p = (char *)vcpu->kvm_run;
+				const uint32_t *index_loc = (p + vcpu->kvm_run->io.data_offset);
+				uint32_t index = *index_loc;
+
+				if( fclose(fileDescArray[index]) == 0){
+					fileDescArray[index] = NULL;
+					fprintf(stdout, "file closed successfully\n");
+				}
+				else{
+					fprintf(stdout, "Error in closing file\n");
+				}
+				fflush(stdout);
+				continue;
 			}
 
 			/* fall through */
