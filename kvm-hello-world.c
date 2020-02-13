@@ -166,7 +166,14 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 	printf("The memory allocated for vCPU is %d Bytes\n.", vcpu_mmap_size);
 	printf("The vCPU memory is starting at %p.\n", vcpu->kvm_run);
 }
-
+#define MAX_OPEN_FILES 150	// by shivam, tells the max size of file descriptor table
+uint32_t findEmptyIndex(FILE *fileDescArray[]){
+	for(int i=0; i<MAX_OPEN_FILES; i++){
+		if(fileDescArray[i] == NULL)
+			return i;
+	}
+	return -1;
+}
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 {
 	struct kvm_regs regs;
@@ -177,7 +184,11 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 	char mode[3];
 				
 	
-	
+	FILE *fileDescArray[MAX_OPEN_FILES];
+	// memset(fileDescArray, -1, sizeof(fileDescArray));
+	for(int i=0; i<MAX_OPEN_FILES; i++){
+		fileDescArray[i] = NULL;
+	}
 	for (;;) {
 		// start running the guest
 		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
@@ -251,7 +262,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 					char filePath[100];
 					char mode[3];
 				}fileData;
-				
+				// reads file path and mode
 				if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
 
 					uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
@@ -267,6 +278,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 					
 					continue;
 				}
+				// opens fle 
 				if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN) {
 
 					// fprintf(stdout, "filePath = %s\n", filePath);
@@ -279,9 +291,14 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 					fflush(filePointer);
 					printf("size of FILE pointer = %d\n", sizeof(filePointer) );
 					printf("allocate fd in host= %lu\n", filePointer);
-					
+					printf("allocate fd in host= %lu\n", (uint32_t)filePointer);
+					uint32_t emptyIndex = findEmptyIndex(fileDescArray);
+					fileDescArray[emptyIndex] = filePointer;
 					uint8_t *p = (uint8_t *)vcpu->kvm_run;
-					memcpy(p + vcpu->kvm_run->io.data_offset, &filePointer, sizeof(filePointer));
+					
+					// memcpy(p + vcpu->kvm_run->io.data_offset, filePointer, sizeof(*filePointer));
+					
+					memcpy(p + vcpu->kvm_run->io.data_offset, &emptyIndex, sizeof(emptyIndex));
 					
 					continue;
 				}
@@ -304,8 +321,8 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 				fprintf(stdout, "string to be written = %s\n", wdt->str);
 				fflush(stdout);
 					
-				// fprintf(wdt->filePointer, "%s", wdt->str);
-				// fflush(wdt->filePointer);
+				fprintf(fileDescArray[(int)(wdt->filePointer)], "%s", wdt->str);
+				fflush(fileDescArray[ (int)(wdt->filePointer)]);
 				continue;
 			}
 			//reads a file

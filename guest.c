@@ -114,7 +114,7 @@ _start(void) {
 	printVal(numExits);
 	
 	uint32_t fd = openFile("./abc.txt", "w");
-	if(fd == NULL){
+	if(fd == -1){
 		display("cannot open the file");
 		return;
 	}
