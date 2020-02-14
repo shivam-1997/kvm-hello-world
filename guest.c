@@ -75,9 +75,11 @@ static void writeFile(uint32_t fd, const char *str){
 		char str[100];
 	}d;
 	d.filePointer = fd;
-	for(int i=0; str[i]!=0; i++){
+	int i;
+	for( i=0; str[i]!=0; i++){
 		d.str[i] = str[i];
 	}
+	d.str[i]=0;
 	outb(0xF1, &d);
 }
 
@@ -178,7 +180,7 @@ _start(void) {
 		display("Error in seek");
 	}
 	// writing from one file to another file
-	readFile(fd1, content, 10);
+	readFile(fd1, content, 100);
 	display(content);
 	writeFile(fd2, content);
 
