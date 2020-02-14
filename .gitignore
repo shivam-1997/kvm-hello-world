@@ -1,3 +1,4 @@
 kvm-hello-world
-*.o
-*.img
+.vscode/*
+abc.txt
+xyz.txt
