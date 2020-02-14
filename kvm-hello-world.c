@@ -1,4 +1,4 @@
-/*shivam
+/*
 	acts as a simple hypervisor,
 	and runs the code within the file guest.c in a sandbox using the KVM API
 */
@@ -107,7 +107,7 @@ void vm_init(struct vm *vm, size_t mem_size)
         perror("KVM_SET_TSS_ADDR");
 		exit(1);
 	}
-	// shivam
+
 	// allocating memory to the guest os
 	vm->mem = mmap(NULL, mem_size, PROT_READ | PROT_WRITE,
 		   			MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE,
@@ -116,7 +116,7 @@ void vm_init(struct vm *vm, size_t mem_size)
 		perror("mmap mem");
 		exit(1);
 	}
-	// shivam
+
 	printf("The memory allocated for the guest OS is %lu Bytes.\n", mem_size);
 	
 	madvise(vm->mem, mem_size, MADV_MERGEABLE);
@@ -153,7 +153,7 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 		perror("KVM_GET_VCPU_MMAP_SIZE");
                 exit(1);
 	}
-	// shivam
+
 	// allocating memory to vCPU,
 	// to store the information it has to exchange with KVM
 	vcpu->kvm_run = mmap(NULL, vcpu_mmap_size, PROT_READ | PROT_WRITE,
@@ -162,12 +162,17 @@ void vcpu_init(struct vm *vm, struct vcpu *vcpu)
 		perror("mmap kvm_run");
 		exit(1);
 	}
-	// shivam
+
 	printf("The memory allocated for vCPU is %d Bytes\n.", vcpu_mmap_size);
 	printf("The vCPU memory is starting at %p.\n", vcpu->kvm_run);
 }
-
-#define MAX_OPEN_FILES 150	// by shivam, tells the max size of file descriptor table
+/*
+	extra functions, variables and macros added by shivam
+*/
+#define MAX_OPEN_FILES 150	// the max size of file descriptor table
+#define MAX_PATH_LENGTH 100
+#define MAX_MODE_LENGTH 3
+					
 uint32_t findEmptyIndex(FILE *fileDescArray[]){
 	for(int i=0; i<MAX_OPEN_FILES; i++){
 		if(fileDescArray[i] == NULL)
@@ -175,41 +180,85 @@ uint32_t findEmptyIndex(FILE *fileDescArray[]){
 	}
 	return -1;
 }
+typedef 
+struct readData{
+	uint32_t filePointer;
+	// char str[100];
+	uint32_t size;
+}rData;
+
+typedef 
+struct data{
+	char filePath[100];
+	char mode[3];
+}fileData;
+
+typedef 
+struct writeData{
+	uint32_t filePointer;
+	char str[100];
+}wData;
+
+typedef 
+struct seekData{
+	uint32_t filePointer;
+	uint32_t offset;
+	uint32_t position;
+}skData;
+				
+uint32_t numExits;		
+char filePath[MAX_PATH_LENGTH];
+char mode[MAX_MODE_LENGTH];
+uint32_t fileDesc_index;
+FILE *filePointer;
+FILE *fileDescArray[MAX_OPEN_FILES];
+uint32_t size;
+int position;
+int offset;		
+
+/*
+	extras end here, again by shivam
+*/
+
 int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 {
 	struct kvm_regs regs;
 	uint64_t memval = 0;
-	// added by shivam
-	uint32_t numExits=0;
-	char filePath[100];
-	char mode[3];
-	uint32_t fileDesc_index;
-	FILE *filePointer;
-	FILE *fileDescArray[MAX_OPEN_FILES];
+	
+	/*
+		initialisations added by shivam
+	*/
+	numExits=0;
 	for(int i=0; i<MAX_OPEN_FILES; i++){
 		fileDescArray[i] = NULL;
 	}
-	uint32_t size;
+	/*
+		initialisation end here, again by shivam
+	*/
 
 	for (;;) {
 		// start running the guest
+		printf("\n");
 		if (ioctl(vcpu->fd, KVM_RUN, 0) < 0) {
 			perror("KVM_RUN");
 			exit(1);
 		}
 		numExits++;
-		printf("EXIT->");
+		printf("HOST->");
+		
 		// in next line the control switches back to hypervisor from guest
 		switch (vcpu->kvm_run->exit_reason) {
 		case KVM_EXIT_HLT:
 			goto check;
-
+		
 		case KVM_EXIT_IO:
 			// printing 8-bit data
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
 			    && vcpu->kvm_run->io.port == 0xE8) {
 				const char *p = (char *)vcpu->kvm_run;
 				const uint8_t *n = (p + vcpu->kvm_run->io.data_offset);
+
+				printf("(print 8-bit) ");
 				fwrite( n, vcpu->kvm_run->io.size, 1, stdout);
 				fflush(stdout);
 				continue;
@@ -217,20 +266,22 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 			// prints 32-bit unsigned data
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
 			    && vcpu->kvm_run->io.port == 0xE9) {
-				const char *p = (char *)vcpu->kvm_run;
-				const uint32_t *n = (p + vcpu->kvm_run->io.data_offset);
-
+			
+				printf("(print 32 bit) ");
+				char *p = (char *)vcpu->kvm_run;
+				uint32_t *n = (p + vcpu->kvm_run->io.data_offset);
+				// printf("%d\n", numExits);
 				fflush(stdout);
 				// fwrite( k, vcpu->kvm_run->io.size, s, stdout);
 				// fwrite( k, sizeof(*k), 1, stdout);
-				fprintf(stdout, "%lu\n", *n);
+				fprintf(stdout, "%lu", *n);
 				fflush(stdout);
 				continue;
 			}
 			// returns number of exits till now
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN
 			    && vcpu->kvm_run->io.port == 0xEA) {
-				
+				printf("(return num of Exits) ");
 				// printf("in %d\n", numExits);
 
 				uint8_t *p = (uint8_t *)vcpu->kvm_run;
@@ -245,7 +296,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 			// prints entire string at once
 			if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT
 			    && vcpu->kvm_run->io.port == 0xEB) {
-				
+				printf("(print string) ");
 				uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
 				uint32_t  *data_guest_virt = (uint32_t *)(vcpu_kvm + vcpu->kvm_run->io.data_offset);
 				char *str = vm->mem + *data_guest_virt  ;
@@ -261,17 +312,13 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 
 			//opens a file			
 			if(vcpu->kvm_run->io.port == 0xF0){
-				typedef struct data{
-					char filePath[100];
-					char mode[3];
-				}fileData;
 				// reads file path and mode
 				if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT) {
-
+					printf("(open file-1) ");
 					uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
 					uint32_t  *data_guest_virt = (uint32_t *)(vcpu_kvm + vcpu->kvm_run->io.data_offset);
 					fileData *fdt = vm->mem + *data_guest_virt  ;
-	
+					
 					strcpy(filePath, fdt->filePath);
 					strcpy(mode, fdt->mode);
 					
@@ -279,10 +326,13 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 				}
 				// opens fle 
 				if (vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN) {
+					printf("(open file-2) ");
 
-					FILE *filePointer = fopen(filePath, mode);
+					filePointer = fopen(filePath, mode);
 					uint32_t emptyIndex = findEmptyIndex(fileDescArray);
 					fileDescArray[emptyIndex] = filePointer;
+					// printf("file name %s\n", filePath);
+					// printf("<%p>", filePointer);
 					
 					uint8_t *p = (uint8_t *)vcpu->kvm_run;
 					// memcpy(p + vcpu->kvm_run->io.data_offset, fp, 4);
@@ -293,12 +343,9 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 				
 			}
 			//writes in a file
-			if(vcpu->kvm_run->io.port == 0xF1 && vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT){
-				
-				typedef struct data{
-					uint32_t filePointer;
-					char str[100];
-				}wData;
+			if(vcpu->kvm_run->io.port == 0xF1 
+				&& vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT){
+				printf("(write file) ");
 				
 				uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
 				uint32_t  *data_guest_virt = (uint32_t *)(vcpu_kvm + vcpu->kvm_run->io.data_offset);
@@ -314,7 +361,7 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 				// fflush(filePointer);
 					
 				if(fprintf(fileDescArray[(int)(fileDesc_index)], "%s", wdt->str)>0){
-					printf("Successfully written to the file\n");
+					printf("Successfully written to the file");
 				}
 				fflush(fileDescArray[ (int)(fileDesc_index)]);
 				
@@ -322,18 +369,10 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 			}
 			//reads a file
 			if(vcpu->kvm_run->io.port == 0xF2 ){
-				printf("**********reading from a file\n");
-				fflush(stdout);
-				
-				typedef struct data{
-					uint32_t filePointer;
-					// char str[100];
-					int size;
-				}rData;
 				
 				if( vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT){
 
-					printf("copying file descriptor\n");
+					printf("(read file-1) ");
 					fflush(stdout);
 				
 					uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
@@ -343,31 +382,80 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 					uint32_t fileDesc_index = rdt->filePointer;
 					
 					filePointer = fileDescArray[fileDesc_index];
+					// printf("<%p>", filePointer);
 					size = rdt -> size;
-					printf("fd in host = %lu\n", fileDesc_index);
-					fflush(stdout);
 					
 					continue;
 				}
 				if( vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN){
-					printf("reading to buffer \n");
-					fflush(stdout);
-				
-					char *buffer =  (char*)malloc(size);
+					printf("(read file-2) ");
+					// printf("fd in host = %lu\n", fileDesc_index);
+					// printf("size in host = %lu", size);
+					// printf("<%p>", filePointer);
+
+					// fflush(stdout);
 					
-					// size_t fread ( void * ptr, size_t size, size_t count, FILE * stream );
+				
+					char *buffer =  (char*)malloc((size+1) * sizeof(char));
+					
 					fread(buffer, sizeof(char), size, filePointer);
-					printf("content in file: %s\n", buffer);
-					fflush(stdout);
+					buffer[size] = 0;
+					// printf("hello\n");
+					// printf("content in file: %s\n", buffer);
+					// fflush(stdout);
+					
 					uint8_t *p = (uint8_t *)vcpu->kvm_run;
-					memcpy(p + vcpu->kvm_run->io.data_offset, &buffer, sizeof(buffer));
+					uint32_t *index_ptr = (p + vcpu->kvm_run->io.data_offset);
+					memcpy( &vm->mem[ *index_ptr], buffer, size+1 );
+					free(buffer);
 					continue;
 				}
 				
 			}
+
+			//seek in a file
+			if(vcpu->kvm_run->io.port == 0xF3 ){
+				
+				if( vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT){
+
+					printf("(seek file-1) ");
+					fflush(stdout);
+				
+					uint8_t *vcpu_kvm =  (uint8_t *)vcpu->kvm_run;
+					uint32_t  *data_guest_virt = (uint32_t *)(vcpu_kvm + vcpu->kvm_run->io.data_offset);
+					skData *skdt = vm->mem + *data_guest_virt  ;
+					
+					uint32_t fileDesc_index = skdt->filePointer;
+					position = (int)skdt->position;
+					offset = (int)skdt->offset;
+					filePointer = fileDescArray[fileDesc_index];
+					
+					continue;
+				}
+				if( vcpu->kvm_run->io.direction == KVM_EXIT_IO_IN){
+					printf("(seek file-2) ");
+					// printf("fd in host = %lu\n", fileDesc_index);
+					// printf("size in host = %lu", size);
+					// printf("<%p>", filePointer);
+
+					// fflush(stdout);
+					uint32_t status = fseek(filePointer, offset, position);
+
+					// printf("hello\n");
+					// fflush(stdout);
+					
+					uint8_t *p = (uint8_t *)vcpu->kvm_run;
+					uint32_t *index_ptr = (p + vcpu->kvm_run->io.data_offset);
+					memcpy( index_ptr, &status, sizeof(status));
+					continue;
+				}
+				
+			}
+
 			//closes a file
-			if(vcpu->kvm_run->io.port == 0xF3 &&
+			if(vcpu->kvm_run->io.port == 0xF4 &&
 				vcpu->kvm_run->io.direction == KVM_EXIT_IO_OUT){
+				printf("(close file) ");
 				
 				const char *p = (char *)vcpu->kvm_run;
 				const uint32_t *index_loc = (p + vcpu->kvm_run->io.data_offset);
@@ -375,10 +463,10 @@ int run_vm(struct vm *vm, struct vcpu *vcpu, size_t sz)
 
 				if( fclose(fileDescArray[index]) == 0){
 					fileDescArray[index] = NULL;
-					fprintf(stdout, "file closed successfully\n");
+					fprintf(stdout, "file closed successfully");
 				}
 				else{
-					fprintf(stdout, "Error in closing file\n");
+					fprintf(stdout, "Error in closing file");
 				}
 				fflush(stdout);
 				continue;
@@ -558,7 +646,6 @@ int run_paged_32bit_mode(struct vm *vm, struct vcpu *vcpu)
 	memcpy(vm->mem, guest32, guest32_end-guest32);
 	return run_vm(vm, vcpu, 4);
 }
-// shivam
 // long(64-bit mode) fucntions start
 extern const unsigned char guest64[], guest64_end[];
 
@@ -578,7 +665,6 @@ static void setup_64bit_code_segment(struct kvm_sregs *sregs)
 		.g = 1, 	/* 4KB granularity */
 	};
 
-	//shivam
 	// code segment
 	sregs->cs = seg; 
 
@@ -659,7 +745,6 @@ int run_long_mode(struct vm *vm, struct vcpu *vcpu)
 	return run_vm(vm, vcpu, 8);
 }
 
-// shivam
 // long(64-bit mode) functions end
 
 int main(int argc, char **argv)
@@ -674,7 +759,6 @@ int main(int argc, char **argv)
 	} mode = REAL_MODE;
 	int opt;
 
-	// shivam
 	// finding the mode to run in using command line argument
 	while ((opt = getopt(argc, argv, "rspl")) != -1) {
 		switch (opt) {
@@ -701,7 +785,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	// shivam
 	// The code within these two functions
 	// allocates memory for the guest and its VCPU respectively
 	vm_init(&vm, 0x200000);
