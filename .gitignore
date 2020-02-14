@@ -1,5 +1,6 @@
 kvm-hello-world
 **/.vscode
+*.o
 xyz.txt
 abc.txt
 Extra_byShivam_forShivam.txt
